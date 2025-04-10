@@ -2,10 +2,12 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 import openai
 import os
+import traceback
 
 app = Flask(__name__)
 CORS(app)  # autorise les requêtes depuis ton front React
 
+# Clé API OpenAI
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route("/chat", methods=["POST"])
@@ -17,6 +19,7 @@ def chat():
         if not user_message:
             return jsonify({ "reply": "Tu n'as rien écrit. Essaie à nouveau !" }), 400
 
+        # Appel OpenAI
         response = openai.ChatCompletion.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -29,7 +32,8 @@ def chat():
         return jsonify({ "reply": bot_reply })
 
     except Exception as e:
-        print("Erreur côté serveur :", e)
+        print("Erreur côté serveur :")
+        traceback.print_exc()  # ✅ Affiche le détail de l’erreur dans les logs Render
         return jsonify({ "reply": "Une erreur est survenue côté serveur. Réessaie plus tard." }), 500
 
 if __name__ == "__main__":
