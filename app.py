@@ -2,37 +2,24 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from openai import OpenAI
 import os
-import traceback
 
 app = Flask(__name__)
 CORS(app)
 
-client = OpenAI()  # Lis la clé API depuis la variable d’environnement OPENAI_API_KEY
+# Initialise le client OpenAI moderne
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @app.route("/chat", methods=["POST"])
 def chat():
     try:
-        data = request.get_json()
-        user_message = data.get("message", "")
-
-        if not user_message:
-            return jsonify({ "reply": "Tu n'as rien écrit. Essaie à nouveau !" }), 400
-
-        chat_completion = client.chat.completions.create(
+        user_input = request.json.get("message")
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
-            messages=[
-                { "role": "system", "content": "Tu es un professeur de trompette expérimenté et bienveillant. Ton objectif est d’aider chaque trompettiste à résoudre ses problèmes techniques en trouvant pour lui l’exercice le plus efficace possible. Réponds toujours en français." },
-                { "role": "user", "content": user_message }
-            ]
+            messages=[{"role": "user", "content": user_input}],
         )
-
-        bot_reply = chat_completion.choices[0].message.content.strip()
-        return jsonify({ "reply": bot_reply })
-
+        return jsonify({"reply": response.choices[0].message.content})
     except Exception as e:
-        print("Erreur côté serveur :", e)
-        traceback.print_exc()
-        return jsonify({ "reply": "Une erreur est survenue côté serveur. Réessaie plus tard." }), 500
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+    app.run(debug=False, host="0.0.0.0", port=10000)
