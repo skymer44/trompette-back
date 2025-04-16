@@ -4,36 +4,19 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-# Charger les variables d'environnement
+# Charger les variables d'environnement (dont OPENAI_API_KEY)
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
+# Créer un client OpenAI avec la clé API
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Prompts
-STRICT_PROMPT = {
+# Prompt système général (sans structure imposée pour "guided")
+SYSTEM_PROMPT = {
     "role": "system",
-    "content": """
-Tu es un professeur de trompette expérimenté et bienveillant. Ton objectif est de proposer des exercices ciblés pour résoudre les problèmes techniques de chaque trompettiste.
-
-Voici la structure de chaque réponse :
-1. Si le problème n’est pas clair, pose une ou deux questions maximum.
-2. Si le problème est identifié, propose un seul exercice immédiatement applicable :
-   - Sois concis et précis.
-   - Utilise la notation latine (do, ré, mi...).
-   - Indique quand faire l'exercice (début, échauffement, fin...).
-3. Termine toujours par cette phrase exacte :
-   \"Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?\"
-
-Ta réponse doit être claire, courte et efficace. Ne donne qu’un seul exercice à la fois.
-"""
-}
-
-FREE_DISCUSSION_PROMPT = {
-    "role": "system",
-    "content": "Tu es un professeur de trompette expérimenté. Réponds de façon naturelle et pédagogique, comme dans une discussion humaine. Pose des questions si besoin, mais ne propose un exercice que si l'utilisateur le demande explicitement."
+    "content": "Tu es un professeur de trompette expérimenté, bienveillant et à l'écoute. Tu donnes des réponses utiles et pédagogiques, avec des conseils concrets. Tu peux aussi poser des questions pour clarifier les besoins de l'utilisateur."
 }
 
 @app.route("/chat", methods=["POST"])
@@ -41,14 +24,15 @@ def chat():
     try:
         data = request.json
         user_messages = data.get("messages", [])
-        discussion_mode = data.get("mode", "guided")  # "guided" par défaut
+        mode = data.get("mode", "free")
 
-        # Valider les messages utilisateurs
+        # Validation : messages doit être une liste de dicts avec un champ "content" texte
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
             if isinstance(msg, dict)
-            and "role" in msg and "content" in msg
+            and "role" in msg
+            and "content" in msg
             and isinstance(msg["content"], str)
             and msg["content"].strip() != ""
         ]
@@ -56,13 +40,15 @@ def chat():
         if not valid_messages:
             return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
-        # Choisir le prompt adapté
-        system_prompt = STRICT_PROMPT if discussion_mode == "guided" else FREE_DISCUSSION_PROMPT
-        conversation = [system_prompt] + valid_messages
+        # Ajouter le prompt système si on est en mode guided
+        if mode == "guided":
+            conversation = [SYSTEM_PROMPT] + valid_messages
+        else:
+            conversation = valid_messages
 
-        # Appel OpenAI
+        # Appel à l'API OpenAI
         response = client.chat.completions.create(
-            model="gpt-4o",  # tu peux changer ça en gpt-3.5-turbo si besoin
+            model="gpt-3.5-turbo",
             messages=conversation
         )
 
