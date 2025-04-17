@@ -10,9 +10,6 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Créer un client OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 # SYSTEM PROMPT corrigé
 SYSTEM_PROMPT = {
     "role": "system",
@@ -23,12 +20,20 @@ Voici comment tu dois répondre :
 1. Quand l'utilisateur décrit un problème, commence par poser UNE seule question courte et simple pour mieux comprendre.
 
 2. Quand tu poses une question :
-    - Si la réponse logique est OUI ou NON, propose uniquement ces deux choix.
-    - Sinon, propose entre 3 et 4 suggestions variées adaptées.
+    - Dans ton message principal : pose uniquement une question claire, sans ajouter "OUI ou NON" dedans.
+    - Dans les suggestions séparées :
+        - Si la réponse logique est OUI ou NON, propose uniquement ces deux choix ("Oui" et "Non").
+        - Sinon, propose entre 2 et 4 suggestions variées adaptées.
 
 Formate les suggestions ainsi, sans rien écrire autour :
 
-Suggestions: 
+Suggestions:
+- Oui
+- Non
+
+ou
+
+Suggestions:
 - Réponse 1
 - Réponse 2
 - Réponse 3
@@ -38,12 +43,10 @@ Suggestions:
 
 Important :
 - Ne propose jamais de suggestions après un exercice.
+- Ne mentionne jamais les réponses (comme "Oui ou Non") dans le texte principal, uniquement dans les suggestions.
 - Sois simple, clair, pédagogue et bienveillant.
 """
 }
-
-# Phrase précise qui ne doit PAS avoir de suggestions
-FEEDBACK_MESSAGE = "Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
 
 @app.route("/chat", methods=["POST"])
 def chat():
@@ -80,18 +83,12 @@ def chat():
         suggestions = []
         if "Suggestions:" in ai_message:
             parts = ai_message.split("Suggestions:")
-            ai_message_clean = parts[0].strip()
+            ai_message = parts[0].strip()
             suggestion_lines = parts[1].strip().splitlines()
             suggestions = [line.lstrip("- ").strip() for line in suggestion_lines if line.strip()]
-        else:
-            ai_message_clean = ai_message
-
-        # Protection spéciale pour la phrase de feedback
-        if ai_message_clean.strip() == FEEDBACK_MESSAGE:
-            suggestions = []
 
         return jsonify({
-            "reply": ai_message_clean,
+            "reply": ai_message,
             "suggestions": suggestions
         })
 
