@@ -55,25 +55,7 @@ RÈGLES ABSOLUES à suivre :
    "Est-ce que cet exercice t'a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
    - JAMAIS de suggestions après un exercice
 
-EXEMPLES DE FORMAT CORRECT :
-
-Exemple 1 (Oui/Non) :
-Est-ce que tu ressens une fatigue musculaire après avoir joué ?
-Suggestions:
-- Oui
-- Non
-
-Exemple 2 (Plusieurs choix) :
-À quel moment de la journée pratiques-tu généralement ?
-Suggestions:
-- Le matin
-- L'après-midi
-- Le soir
-- À des horaires variables
-
-Exemple 3 (Exercice) :
-Voici un exercice pour améliorer ton endurance : [description de l'exercice]
-Est-ce que cet exercice t'a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"""
+"""
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -96,23 +78,13 @@ def chat():
         # Add system prompt at the beginning
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + valid_messages
 
-        # Log the conversation being sent to OpenAI
-        print("\n=== Sending to OpenAI ===")
-        for msg in conversation:
-            print(f"{msg['role'].upper()}: {msg['content'][:100]}...")
-
         # Get response from OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=conversation
         )
 
-        # Extract the response text
         ai_message = response.choices[0].message.content.strip()
-
-        # Log the response from OpenAI
-        print("\n=== Response from OpenAI ===")
-        print(ai_message)
 
         # Initialize suggestions list
         suggestions = []
@@ -125,34 +97,29 @@ def chat():
             # Split the message and extract suggestions
             parts = ai_message.split("Suggestions:")
             ai_message = parts[0].strip()
-            
-            # Parse suggestions, removing empty lines and bullet points
-            suggestion_text = parts[1].strip()
-            suggestions = [
-                line.strip().lstrip('- ').strip()
-                for line in suggestion_text.split('\n')
-                if line.strip() and line.strip() != '-'
-            ]
 
-            # Validate Yes/No suggestions
+            # Improved parsing to split multiple suggestions even if they are on the same line
+            suggestion_text = parts[1].strip()
+            raw_suggestions = []
+            for line in suggestion_text.split('\n'):
+                if line.strip():
+                    # Split again if multiple '- ' appear in the same line
+                    parts_line = line.split('- ')
+                    for part in parts_line:
+                        part = part.strip()
+                        if part:
+                            raw_suggestions.append(part)
+            suggestions = raw_suggestions
+
+            # Normalize if it's a yes/no question
             if len(suggestions) == 2 and suggestions[0].lower() in ['oui', 'yes'] and suggestions[1].lower() in ['non', 'no']:
-                suggestions = ['Oui', 'Non']  # Normalize to French
-            elif 2 <= len(suggestions) <= 4:
-                pass  # Keep suggestions as is
-            else:
-                print("\n=== Warning: Invalid number of suggestions ===")
-                print(f"Found {len(suggestions)} suggestions: {suggestions}")
+                suggestions = ['Oui', 'Non']
 
         # Format the response
         response_data = {
             'reply': ai_message,
             'suggestions': suggestions
         }
-
-        # Log the final formatted response
-        print("\n=== Final Response ===")
-        print(response_data)
-        print("==================\n")
 
         return jsonify(response_data)
 
