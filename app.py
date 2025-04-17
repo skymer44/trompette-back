@@ -1,44 +1,41 @@
+from openai import OpenAI
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from openai import OpenAI
 from dotenv import load_dotenv
-import os
 
-# Charger les variables d'environnement (comme OPENAI_API_KEY)
+# Charger les variables d'environnement
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-# Créer un client OpenAI
+# Initialiser OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# SYSTEM PROMPT corrigé
+# Prompt système corrigé
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": """Tu es un professeur de trompette expérimenté.
+    "content": """
+Tu es un professeur de trompette expérimenté. Voici exactement comment tu dois te comporter :
 
-Voici comment tu dois répondre :
+1. Si le problème n'est pas encore clair ou précis, POSE UNE SEULE QUESTION.
+    ➔ Après ta question, propose TOUJOURS entre 2 et 4 réponses possibles sous forme de texte court, en français, adaptées au contexte.
+    ➔ Même si ce n'est pas évident, invente les réponses les plus logiques et naturelles possibles, mais sans jamais inventer du faux.
 
-1. Quand l'utilisateur décrit un problème, commence par poser UNE seule question courte et simple pour mieux comprendre.
+2. Si tu as compris clairement le problème, PROPOSE UN EXERCICE.
+    ➔ Donne un seul exercice clair, concis et ciblé.
+    ➔ Utilise la notation latine pour les notes de musique (do, ré, mi…).
+    ➔ Indique dans quel moment le pratiquer (échauffement, début, fin...).
 
-2. Quand tu poses une question :
-    - Si la réponse logique est OUI ou NON, propose uniquement ces deux choix.
-    - Sinon, propose entre 3 et 4 suggestions variées adaptées.
-
-Formate les suggestions ainsi, sans rien écrire autour :
-
-Suggestions: 
-- Réponse 1
-- Réponse 2
-- Réponse 3
-
-3. Quand le problème est suffisamment clair, propose UN SEUL exercice ciblé. Termine alors ton message par cette phrase EXACTE :
+3. Après avoir donné un exercice, termine TOUJOURS ton message par cette phrase EXACTE :
 "Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
 
-Important :
-- Ne propose jamais de suggestions après un exercice.
-- Sois simple, clair, pédagogue et bienveillant.
+Rappels importants :
+- Ne pose jamais une question ET un exercice dans le même message.
+- Ne propose jamais zéro ni plus de 4 suggestions après une question.
+- Si la réponse libre est meilleure pour l'utilisateur, il pourra toujours écrire sa réponse manuellement.
+- Sois toujours bienveillant, encourageant et professionnel.
 """
 }
 
@@ -48,41 +45,43 @@ def chat():
         data = request.json
         user_messages = data.get("messages", [])
         
-        # Validation : filtrer les messages valides
+        # Validation des messages
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
-            if isinstance(msg, dict)
-            and "role" in msg
-            and "content" in msg
-            and isinstance(msg["content"], str)
-            and msg["content"].strip() != ""
+            if isinstance(msg, dict) and "role" in msg and "content" in msg and isinstance(msg["content"], str) and msg["content"].strip() != ""
         ]
 
         if not valid_messages:
             return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
-        # Ajouter le système prompt au début
+        # Construire la conversation avec le system prompt
         conversation = [SYSTEM_PROMPT] + valid_messages
 
-        # Appel API OpenAI
+        # Appeler OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=conversation
+            messages=conversation,
+            temperature=0.5  # Optionnel : pour des réponses plus naturelles
         )
 
-        ai_message = response.choices[0].message.content.strip()
+        reply_content = response.choices[0].message.content.strip()
 
-        # Extraire suggestions si présentes
+        # Détecter s'il y a des suggestions encadrées (markdown liste ou numérotation simple)
         suggestions = []
-        if "Suggestions:" in ai_message:
-            parts = ai_message.split("Suggestions:")
-            ai_message = parts[0].strip()
-            suggestion_lines = parts[1].strip().splitlines()
-            suggestions = [line.lstrip("- ").strip() for line in suggestion_lines if line.strip()]
+        lines = reply_content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith("1.") or line.startswith("2.") or line.startswith("3.") or line.startswith("4.") or line.startswith("- "):
+                suggestion = line[line.find(' ')+1:].strip()
+                suggestions.append(suggestion)
+
+        # Limiter à 2-4 suggestions seulement
+        if len(suggestions) < 2 or len(suggestions) > 4:
+            suggestions = []
 
         return jsonify({
-            "reply": ai_message,
+            "reply": reply_content,
             "suggestions": suggestions
         })
 
