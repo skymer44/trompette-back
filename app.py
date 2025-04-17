@@ -106,7 +106,7 @@ def get_openai_response(messages: list, max_retries: int = 3) -> Optional[Dict[s
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=messages,
-                response_format="json_object"  # ✅ CORRECT ET À JOUR
+                response_format={"type": "json_object"}
             )
 
             content = response.choices[0].message.content.strip()
