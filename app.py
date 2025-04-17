@@ -63,9 +63,14 @@ RÈGLES ABSOLUES à suivre pour CHAQUE réponse :
    - Aucun texte hors du JSON
    - Structure JSON toujours complète
    - Pas de formatage ou markdown dans "reply"
-   - Suggestions toujours cohérentes avec la question"""
+   - Suggestions toujours cohérentes avec la question
+"""
 
 def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
+    """
+    Validate the OpenAI response format and content.
+    Returns the parsed JSON if valid, None otherwise.
+    """
     try:
         parsed = json.loads(response)
         if not all(key in parsed for key in ["reply", "suggestions", "is_exercise"]):
@@ -91,25 +96,37 @@ def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
         return None
 
 def get_openai_response(messages: list, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+    """
+    Get and validate response from OpenAI with retry mechanism.
+    """
     for attempt in range(max_retries):
         try:
             logger.info(f"Attempting OpenAI request (attempt {attempt + 1}/{max_retries})")
+
             response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=messages,
-                response_format={"type": "json"}  # 🔥 CORRECTION VITALE ICI 🔥
+                response_format="json_object"  # ✅ CORRECT ET À JOUR
             )
+
             content = response.choices[0].message.content.strip()
             logger.info(f"OpenAI raw response: {content}")
+
             validated_response = validate_openai_response(content)
             if validated_response:
                 return validated_response
+
             logger.warning(f"Invalid response format (attempt {attempt + 1})")
+
         except Exception as e:
             logger.error(f"OpenAI API error (attempt {attempt + 1}): {str(e)}")
+
     return None
 
 def create_error_response(message: str = "Une erreur est survenue. Veuillez réessayer.") -> Dict[str, Any]:
+    """
+    Create a standardized error response.
+    """
     return {
         "reply": message,
         "suggestions": [],
@@ -123,7 +140,9 @@ def chat():
         if not data or 'messages' not in data:
             logger.warning("Invalid request: missing messages")
             return jsonify(create_error_response("Format de requête invalide")), 400
+
         logger.info(f"Received chat request with {len(data['messages'])} messages")
+
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in data["messages"]
@@ -133,13 +152,17 @@ def chat():
             and isinstance(msg["content"], str)
             and msg["content"].strip()
         ]
+
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + valid_messages
+
         response = get_openai_response(conversation)
         if not response:
             logger.error("Failed to get valid response from OpenAI")
             return jsonify(create_error_response()), 500
+
         logger.info("Sending successful response to client")
         return jsonify(response), 200
+
     except Exception as e:
         logger.error(f"Unexpected error in chat endpoint: {str(e)}")
         return jsonify(create_error_response()), 500
