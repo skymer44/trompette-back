@@ -95,9 +95,9 @@ def get_openai_response(messages: list, max_retries: int = 3) -> Optional[Dict[s
         try:
             logger.info(f"Attempting OpenAI request (attempt {attempt + 1}/{max_retries})")
             response = client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o",
                 messages=messages,
-                response_format="json_object"
+                response_format={"type": "json_object"}  # CORRECT HERE
             )
             content = response.choices[0].message.content.strip()
             logger.info(f"OpenAI raw response: {content}")
@@ -134,6 +134,7 @@ def chat():
             and isinstance(msg["content"], str)
             and msg["content"].strip()
         ]
+
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + valid_messages
         response = get_openai_response(conversation)
         if not response:
@@ -142,7 +143,6 @@ def chat():
 
         logger.info("Sending successful response to client")
         return jsonify(response), 200
-
     except Exception as e:
         logger.error(f"Unexpected error in chat endpoint: {str(e)}")
         return jsonify(create_error_response()), 500
