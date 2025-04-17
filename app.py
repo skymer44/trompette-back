@@ -26,50 +26,77 @@ client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
 SYSTEM_PROMPT = """Tu es un professeur de trompette expérimenté et bienveillant. Ta mission est d'aider les élèves à progresser en comprenant précisément leurs difficultés avant de proposer des solutions.
 
-RÈGLES ABSOLUES À SUIVRE :
+RÈGLES ABSOLUES à suivre pour CHAQUE réponse :
 
-1. FORMAT UNIQUE : Tu dois TOUJOURS répondre en JSON structuré ainsi :
+1. FORMAT UNIQUE : Répondre UNIQUEMENT en JSON valide avec cette structure exacte :
 {
-  "reply": "ton message écrit normalement",
+  "reply": "ton message",
   "suggestions": ["suggestion 1", "suggestion 2", ...],
-  "is_exercise": true/false
+  "is_exercise": false/true
 }
 
-2. RÈGLES POUR LES QUESTIONS (is_exercise = false) :
-- Pose UNE seule question courte pour comprendre le problème.
-- Si c'est une question Oui/Non, les suggestions doivent être ["Oui", "Non"].
-- Sinon, propose 2 à 4 suggestions claires (pas des questions).
-- "suggestions" doit contenir uniquement des propositions (PAS des questions).
+2. DEUX TYPES DE RÉPONSES POSSIBLES :
 
-3. RÈGLES POUR LES EXERCICES (is_exercise = true) :
-- Quand le problème est compris, propose UN exercice ciblé.
-- Le champ "suggestions" doit être une liste vide [].
-- Termine toujours le message d'exercice par EXACTEMENT :
-"Est-ce que cet exercice t'a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+   A) QUESTIONS (is_exercise: false)
+      - But : comprendre précisément le problème
+      - Une seule question courte et précise
+      - Suggestions selon le type de question :
+        * Question Oui/Non : ["Oui", "Non"]
+        * Autres questions : 2 à 4 suggestions pertinentes
+      - Ne jamais donner de conseil ou d'exercice
+      - Ne pas orienter vers une solution
 
-4. RÈGLES GÉNÉRALES :
-- AUCUN texte en dehors du JSON.
-- Le JSON doit être propre, sans balises, sans Markdown, sans texte autour.
-- Ne promets JAMAIS d'exercice si tu n'en proposes pas immédiatement.
-- Si tu poses une question, assure-toi que "suggestions" est bien rempli correctement.
-"""
+   B) EXERCICES (is_exercise: true)
+      - Uniquement quand le problème est bien compris
+      - "suggestions" doit être une liste vide []
+      - "reply" doit contenir :
+        1. Description claire de l'exercice
+        2. Se terminer EXACTEMENT par :
+           "Est-ce que cet exercice t'a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+
+3. GESTION DES RETOURS :
+   - Si l'utilisateur donne un retour sur un exercice :
+     * Ne pas reposer de question
+     * Adapter la réponse selon le retour (nouvel exercice ou variation)
+
+4. RÈGLES STRICTES :
+   - Aucun texte hors du JSON
+   - Structure JSON toujours complète
+   - Pas de formatage ou markdown dans "reply"
+   - Suggestions toujours cohérentes avec la question"""
 
 def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
+    """
+    Validate the OpenAI response format and content.
+    Returns the parsed JSON if valid, None otherwise.
+    """
     try:
+        # Parse JSON
         parsed = json.loads(response)
+        
+        # Validate required fields
         if not all(key in parsed for key in ["reply", "suggestions", "is_exercise"]):
             logger.error(f"Missing required fields in response: {parsed}")
             return None
-        if not isinstance(parsed["reply"], str) or not isinstance(parsed["suggestions"], list) or not isinstance(parsed["is_exercise"], bool):
+            
+        # Validate types
+        if not isinstance(parsed["reply"], str) or \
+           not isinstance(parsed["suggestions"], list) or \
+           not isinstance(parsed["is_exercise"], bool):
             logger.error(f"Invalid field types in response: {parsed}")
             return None
+            
+        # Validate suggestions
         if parsed["is_exercise"] and len(parsed["suggestions"]) != 0:
             logger.error(f"Exercise response contains suggestions: {parsed}")
             return None
+            
         if not parsed["is_exercise"] and not (2 <= len(parsed["suggestions"]) <= 4):
             logger.error(f"Invalid number of suggestions for question: {parsed}")
             return None
+            
         return parsed
+        
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
         return None
@@ -78,25 +105,37 @@ def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
         return None
 
 def get_openai_response(messages: list, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+    """
+    Get and validate response from OpenAI with retry mechanism.
+    """
     for attempt in range(max_retries):
         try:
             logger.info(f"Attempting OpenAI request (attempt {attempt + 1}/{max_retries})")
+            
             response = client.chat.completions.create(
-                model="gpt-4o",
+                model="gpt-4",
                 messages=messages,
-                response_format="json_object"
+                response_format="json_object"  # 🔥 Correction ici
             )
+            
             content = response.choices[0].message.content.strip()
             logger.info(f"OpenAI raw response: {content}")
+            
             validated_response = validate_openai_response(content)
             if validated_response:
                 return validated_response
+                
             logger.warning(f"Invalid response format (attempt {attempt + 1})")
+            
         except Exception as e:
             logger.error(f"OpenAI API error (attempt {attempt + 1}): {str(e)}")
+            
     return None
 
 def create_error_response(message: str = "Une erreur est survenue. Veuillez réessayer.") -> Dict[str, Any]:
+    """
+    Create a standardized error response.
+    """
     return {
         "reply": message,
         "suggestions": [],
@@ -106,13 +145,16 @@ def create_error_response(message: str = "Une erreur est survenue. Veuillez rée
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
+        # Validate request
         data = request.get_json()
         if not data or 'messages' not in data:
             logger.warning("Invalid request: missing messages")
             return jsonify(create_error_response("Format de requête invalide")), 400
 
+        # Log incoming request
         logger.info(f"Received chat request with {len(data['messages'])} messages")
-
+        
+        # Validate and format messages
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in data["messages"]
@@ -122,17 +164,20 @@ def chat():
             and isinstance(msg["content"], str)
             and msg["content"].strip()
         ]
-
+        
+        # Prepare conversation with system prompt
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + valid_messages
-
+        
+        # Get OpenAI response
         response = get_openai_response(conversation)
         if not response:
             logger.error("Failed to get valid response from OpenAI")
             return jsonify(create_error_response()), 500
-
+            
+        # Return successful response
         logger.info("Sending successful response to client")
         return jsonify(response), 200
-
+        
     except Exception as e:
         logger.error(f"Unexpected error in chat endpoint: {str(e)}")
         return jsonify(create_error_response()), 500
