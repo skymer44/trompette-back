@@ -1,42 +1,47 @@
+from openai import OpenAI
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-from openai import OpenAI
-import os
 
 # Charger les variables d'environnement
 load_dotenv()
 
+# Initialisation Flask
 app = Flask(__name__)
 CORS(app)
 
+# Initialisation OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Prompt système pour cadrer l'IA
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": """Tu es un professeur de trompette expérimenté. Voici comment tu dois répondre :
-
-1. Si le problème de l'élève n'est pas clair :
-    - Pose UNE question à la fois pour mieux comprendre.
-    - En dessous de ta question, propose 3 ou 4 réponses possibles sous forme de liste numérotée :
-      Exemple :
-      1. Pendant l'échauffement
-      2. Pendant les morceaux
-      3. Quand je suis fatigué
-      4. Tout le temps
-2. Quand tu as assez d'informations, propose UN seul exercice clair :
-    - Sois concis et précis.
-    - Utilise la notation latine (do, ré, mi…).
-    - Précise quand pratiquer l'exercice (échauffement, début, fin…).
-3. Après avoir donné un exercice, termine toujours par cette phrase exacte :
-   "Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+    "content": """Tu es un professeur de trompette expérimenté. Voici comment tu dois fonctionner :
+    
+1. Si l'utilisateur expose un problème, commence par lui poser UNE seule question à la fois pour mieux comprendre. Ne propose pas d'exercice tout de suite.
+2. Quand tu as assez d'informations pour comprendre le problème, propose UN seul exercice clair et court.
+3. Lorsque tu proposes un exercice, termine toujours par la phrase EXACTE :
+"Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
 
 Important :
-- Ne propose jamais une question et un exercice en même temps.
-- Ne propose pas d'options de réponse après un exercice (seulement un formulaire de feedback).
-- Reste bienveillant, pédagogue et encourageant.
+- Quand tu poses une question, fournis en plus une liste de 2 à 4 suggestions d'exemples de réponses typiques sous forme de tableau JSON.
+- Quand tu proposes un exercice, NE DONNE AUCUNE suggestion supplémentaire. Juste l'exercice + la phrase de feedback.
+- Utilise un ton pédagogue, encourageant et humain.
+- Utilise la notation latine (do, ré, mi...) pour les notes de musique.
+- Ne donne jamais d'exercice dans la même réponse qu'une question.
 
-Attention : respecte bien la structure pour que le système puisse comprendre et afficher les choix.
+Format de réponse obligatoire :
+{
+  "reply": "ta réponse textuelle complète ici",
+  "suggestions": ["réponse possible 1", "réponse possible 2", "réponse possible 3"]
+}
+OU
+{
+  "reply": "ta réponse textuelle complète ici",
+  "suggestions": []
+}
+Ne JAMAIS oublier ce format JSON propre, même si tu n'as pas de suggestions.
 """
 }
 
@@ -44,19 +49,16 @@ Attention : respecte bien la structure pour que le système puisse comprendre et
 def chat():
     try:
         data = request.json
-        
-        if not data or "messages" not in data:
-            return jsonify({"error": "Requête invalide : pas de messages."}), 400
-        
-        user_messages = data["messages"]
+        user_messages = data.get("messages", [])
 
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
             if isinstance(msg, dict)
-            and msg.get("role") in ["user", "assistant"]
-            and isinstance(msg.get("content"), str)
-            and msg.get("content").strip() != ""
+            and "role" in msg
+            and "content" in msg
+            and isinstance(msg["content"], str)
+            and msg["content"].strip() != ""
         ]
 
         if not valid_messages:
@@ -67,16 +69,15 @@ def chat():
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=conversation,
-            temperature=0.4,
-            max_tokens=800
+            response_format="json"
         )
 
-        ai_reply = response.choices[0].message.content.strip()
+        ai_message = response.choices[0].message.content
 
-        return jsonify({"reply": ai_reply})
+        return jsonify({"reply": ai_message})
 
     except Exception as e:
-        print(f"Erreur serveur : {str(e)}")
+        print("Erreur serveur:", e)
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
