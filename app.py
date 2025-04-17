@@ -11,10 +11,8 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Créer un client OpenAI avec la clé API
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Prompt système structuré
 SYSTEM_PROMPT = {
     "role": "system",
     "content": """
@@ -22,24 +20,21 @@ Tu es un professeur de trompette expérimenté et bienveillant.
 
 Important :
 - Tu dois TOUJOURS répondre strictement en JSON.
-- Le JSON doit contenir deux clés : 
-  - "reply" : la phrase principale que tu veux afficher à l'utilisateur (sans liste, sans numérotation)
-  - "suggestions" : un tableau (array) de 2 à 4 suggestions possibles à cliquer.
+- Le JSON doit contenir deux clés :
+  - "reply" : le message principal affiché à l'utilisateur.
+  - "suggestions" : un tableau (array) contenant 2 à 4 suggestions, ou [].
 
-Règles :
-- Si tu poses une question (par exemple pour clarifier un problème), génère entre 2 et 4 suggestions courtes et naturelles.
-- Si tu proposes un exercice, alors :
-  - Le "reply" contient l'explication de l'exercice.
-  - Le "suggestions" doit être vide [].
+Nouvelles règles :
+- Si ton "reply" est une vraie question (terminée par '?'), alors génère 2 à 4 suggestions d'options de réponse naturelles.
+- Si ton "reply" n'est pas une question (pas de '?'), alors mets "suggestions": [].
 
-Attention :
-- Tu ne dois jamais écrire les suggestions dans le texte principal ("reply").
-- Le "reply" doit être naturel et sans numérotation.
-- Le JSON doit être valide.
+Contraintes :
+- N'écris jamais les suggestions dans le texte du "reply".
+- Ton "reply" doit être naturel, humain et sans numérotation.
 
-Exemples corrects :
-{"reply": "Est-ce que tu ressens une tension dans l'embouchure ?", "suggestions": ["Oui", "Non", "Parfois"]}
-{"reply": "Voici un exercice pour améliorer ton souffle...", "suggestions": []}
+Exemples valides :
+{"reply": "As-tu mal aux lèvres après avoir joué ?", "suggestions": ["Oui", "Non", "Parfois"]}
+{"reply": "Voici un exercice pour t'aider à travailler ton souffle.", "suggestions": []}
 """
 }
 
@@ -49,7 +44,6 @@ def chat():
         data = request.json
         user_messages = data.get("messages", [])
 
-        # Validation basique
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
@@ -63,10 +57,8 @@ def chat():
         if not valid_messages:
             return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
-        # Conversation complète
         conversation = [SYSTEM_PROMPT] + valid_messages
 
-        # Appel à OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=conversation,
@@ -75,11 +67,9 @@ def chat():
 
         raw_content = response.choices[0].message.content.strip()
 
-        # Essayer de parser proprement le JSON
         try:
             parsed_response = json.loads(raw_content)
 
-            # Vérifier que les bonnes clés existent
             if "reply" in parsed_response and "suggestions" in parsed_response:
                 return jsonify({
                     "reply": parsed_response["reply"],
