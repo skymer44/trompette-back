@@ -1,25 +1,23 @@
-from openai import OpenAI
-import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+from openai import OpenAI
+import os
 
-# Charger les variables d'environnement (dont OPENAI_API_KEY)
-
+# Charger les variables d'environnement (.env)
 load_dotenv()
 
-app = Flask(**name**)
+# Initialiser Flask
+app = Flask(__name__)
 CORS(app)
 
-# Créer un client OpenAI avec la clé API
-
+# Initialiser OpenAI avec la clé d'API
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Prompt système structuré pour le rôle d’assistant trompette
-
+# Prompt système de l'IA
 SYSTEM_PROMPT = {
-"role": "system",
-"content": """Tu es un professeur de trompette expérimenté. Voici comment tu dois répondre :
+    "role": "system",
+    "content": """Tu es un professeur de trompette expérimenté. Voici comment tu dois répondre :
 
 1. Si le problème décrit n'est pas encore clair ou précis, pose UNE seule question à la fois pour mieux comprendre. Ne propose PAS ENCORE d'exercice.
 2. Quand tu es sûr du problème rencontré, propose UN SEUL exercice ciblé.
@@ -39,41 +37,43 @@ Important :
 
 @app.route("/chat", methods=["POST"])
 def chat():
-try:
-data = request.json
-user_messages = data.get("messages", [])
+    try:
+        data = request.json
+        user_messages = data.get("messages", [])
+        
+        # Validation des messages
+        valid_messages = [
+            {"role": msg["role"], "content": msg["content"]}
+            for msg in user_messages
+            if isinstance(msg, dict)
+            and "role" in msg
+            and "content" in msg
+            and isinstance(msg["content"], str)
+            and msg["content"].strip() != ""
+        ]
 
-```
-    # Validation : messages doit être une liste de dicts avec un champ "content" texte
-    valid_messages = [
-        {"role": msg["role"], "content": msg["content"]}
-        for msg in user_messages
-        if isinstance(msg, dict)
-        and "role" in msg
-        and "content" in msg
-        and isinstance(msg["content"], str)
-        and msg["content"].strip() != ""
-    ]
+        if not valid_messages:
+            return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
-    if not valid_messages:
-        return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
+        # Construire la conversation avec le prompt système
+        conversation = [SYSTEM_PROMPT] + valid_messages
 
-    # Ajouter le prompt système au début
-    conversation = [SYSTEM_PROMPT] + valid_messages
+        # Choix du modèle (GPT-4o pour rapidité et qualité)
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=conversation,
+            temperature=0.5,  # Un peu de créativité mais reste très rigoureux
+            max_tokens=800  # Limite pour éviter des réponses trop longues
+        )
 
-    # Appel à l'API OpenAI
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=conversation
-    )
+        ai_reply = response.choices[0].message.content.strip()
 
-    return jsonify({"reply": response.choices[0].message.content})
+        return jsonify({"reply": ai_reply})
 
-except Exception as e:
-    print("Erreur serveur:", e)
-    return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        print("Erreur serveur:", e)
+        return jsonify({"error": str(e)}), 500
 
-```
-
-if **name** == "**main**":
-app.run(host="0.0.0.0", port=10000)
+# Lancer l'application
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=10000)
