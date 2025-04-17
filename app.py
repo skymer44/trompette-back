@@ -1,3 +1,5 @@
+# Nouveau backend ultra fiable avec JSON strict
+
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -14,47 +16,29 @@ CORS(app)
 # Configure OpenAI
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-SYSTEM_PROMPT = """Tu es un professeur de trompette expérimenté et bienveillant. Ta mission est de comprendre précisément le problème de l'élève avant de proposer une solution.
+# Nouveau SYSTEM PROMPT strict
+SYSTEM_PROMPT = """
+Tu es un professeur de trompette expérimenté et bienveillant.
 
-RÈGLES ABSOLUES à suivre :
+Ta mission est de comprendre précisément le problème de l'élève avant de proposer une solution.
 
-1. PREMIÈRE ÉTAPE - COMPRENDRE (OBLIGATOIRE)
-   - Quand l'utilisateur décrit un problème, pose TOUJOURS une seule question courte et précise
-   - But unique : comprendre exactement la difficulté rencontrée
-   - Ne JAMAIS donner de conseil ou d'exercice à cette étape
-   - Ne JAMAIS orienter vers une solution
-   - Juste poser UNE question pertinente
-
-2. FORMAT DES SUGGESTIONS (ULTRA CRITIQUE)
-   TOUJOURS respecter ce format exact :
-
-   Pour une réponse Oui/Non :
-   [Ta question]
-   Suggestions:
-   - Oui
-   - Non
-
-   Pour les autres cas :
-   [Ta question]
-   Suggestions:
-   - Suggestion 1
-   - Suggestion 2
-   - Suggestion 3
-   [2 à 4 suggestions maximum]
-
-   RÈGLES DE FORMATAGE STRICTES :
-   - Le mot "Suggestions:" DOIT être sur une ligne seule
-   - CHAQUE suggestion DOIT commencer par "- "
-   - UNE SEULE suggestion par ligne
-   - JAMAIS de tirets ou séparateurs entre les suggestions
-   - JAMAIS de suggestions sur la même ligne
-
-3. EXERCICE (UNIQUEMENT QUAND LE PROBLÈME EST CLAIR)
-   - Propose UN SEUL exercice ciblé
-   - Termine EXACTEMENT par :
+RÈGLES ABSOLUES :
+1. Si l'utilisateur expose un problème, pose UNE seule question courte pour mieux comprendre.
+2. Si une question attend une réponse Oui/Non, propose uniquement "Oui" et "Non".
+3. Sinon, propose entre 2 et 4 suggestions pertinentes.
+4. Si le problème est compris, propose UN seul exercice et termine EXACTEMENT par :
    "Est-ce que cet exercice t'a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
-   - JAMAIS de suggestions après un exercice
 
+IMPORTANT : Tu dois TOUJOURS répondre sous forme d'un JSON strict. Pas de texte autour, uniquement du JSON.
+
+Format attendu :
+{
+  "reply": "ta question ou la proposition d'exercice",
+  "suggestions": ["suggestion 1", "suggestion 2", "suggestion 3"],
+  "is_exercise": false
+}
+
+Si c'est un exercice, "is_exercise" doit être à true, et "suggestions" doit être une liste vide [].
 """
 
 @app.route('/chat', methods=['POST'])
@@ -78,48 +62,33 @@ def chat():
         # Add system prompt at the beginning
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + valid_messages
 
+        # Log the conversation being sent to OpenAI
+        print("\n=== Sending to OpenAI ===")
+        for msg in conversation:
+            print(f"{msg['role'].upper()}: {msg['content'][:100]}...")
+
         # Get response from OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=conversation
+            messages=conversation,
+            response_format="json"  # Force OpenAI à répondre en JSON
         )
 
-        ai_message = response.choices[0].message.content.strip()
+        # Parse the JSON response
+        ai_response = response.choices[0].message.content.strip()
+        parsed_response = eval(ai_response)  # Convert JSON string to Python dict
 
-        # Initialize suggestions list
-        suggestions = []
-
-        # Check if this is a question (has suggestions) or an exercise (has feedback request)
-        has_feedback_request = "Est-ce que cet exercice t'a aidé ?" in ai_message
-        has_suggestions = "Suggestions:" in ai_message
-
-        if has_suggestions and not has_feedback_request:
-            # Split the message and extract suggestions
-            parts = ai_message.split("Suggestions:")
-            ai_message = parts[0].strip()
-
-            # Improved parsing to split multiple suggestions even if they are on the same line
-            suggestion_text = parts[1].strip()
-            raw_suggestions = []
-            for line in suggestion_text.split('\n'):
-                if line.strip():
-                    # Split again if multiple '- ' appear in the same line
-                    parts_line = line.split('- ')
-                    for part in parts_line:
-                        part = part.strip()
-                        if part:
-                            raw_suggestions.append(part)
-            suggestions = raw_suggestions
-
-            # Normalize if it's a yes/no question
-            if len(suggestions) == 2 and suggestions[0].lower() in ['oui', 'yes'] and suggestions[1].lower() in ['non', 'no']:
-                suggestions = ['Oui', 'Non']
-
-        # Format the response
+        # Format final output
         response_data = {
-            'reply': ai_message,
-            'suggestions': suggestions
+            'reply': parsed_response.get('reply', ''),
+            'suggestions': parsed_response.get('suggestions', []),
+            'is_exercise': parsed_response.get('is_exercise', False)
         }
+
+        # Log the final formatted response
+        print("\n=== Final Response ===")
+        print(response_data)
+        print("==================\n")
 
         return jsonify(response_data)
 
