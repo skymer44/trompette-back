@@ -113,10 +113,10 @@ def get_openai_response(messages: list, max_retries: int = 3) -> Optional[Dict[s
             logger.info(f"Attempting OpenAI request (attempt {attempt + 1}/{max_retries})")
             
             response = client.chat.completions.create(
-                model="gpt-4",
-                messages=messages,
-                response_format={ "type": "json" }
-            )
+    model="gpt-4",
+    messages=messages,
+    response_format="json_object"
+)
             
             content = response.choices[0].message.content.strip()
             logger.info(f"OpenAI raw response: {content}")
