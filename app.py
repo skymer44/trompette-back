@@ -1,57 +1,52 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from openai import OpenAI
 from dotenv import load_dotenv
 import os
+from openai import OpenAI
 
-# Charger les variables d'environnement
+# Load environment variables
 load_dotenv()
 
+# Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
-# Créer un client OpenAI
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Configure OpenAI
+client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-# SYSTEM PROMPT
-SYSTEM_PROMPT = {
-    "role": "system",
-    "content": """
-Tu es un professeur de trompette expérimenté.
+SYSTEM_PROMPT = """Tu es un professeur de trompette expérimenté.
 
-Voici comment tu dois structurer tes réponses :
+Voici comment tu dois répondre :
 
-- Quand l'utilisateur exprime un problème, commence toujours par poser UNE question claire et simple pour mieux comprendre.
-- À chaque question, propose entre 2 et 4 suggestions pertinentes adaptées, sous la forme suivante, sans rien écrire autour :
+1. Quand l'utilisateur décrit un problème, commence par poser UNE seule question courte et simple pour mieux comprendre.
 
-Suggestions:
-- Réponse 1
-- Réponse 2
-- Réponse 3
-- (Réponse 4, si utile)
+2. Quand tu poses une question :
+   - Si la réponse logique est OUI ou NON, propose uniquement ces deux choix.
+   - Sinon, propose entre 2 et 4 suggestions variées adaptées.
+   - Sépare toujours les suggestions du texte principal avec "Suggestions:"
 
-- Quand le problème est suffisamment clair, propose UN exercice précis. Termine alors ton message par cette phrase exacte :
+3. Quand le problème est suffisamment clair, propose UN SEUL exercice ciblé.
+   - Termine alors par EXACTEMENT cette phrase :
+   "Est-ce que cet exercice t'a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+   - Ne propose JAMAIS de suggestions après un exercice.
 
-"Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+Important :
+- Sois simple, clair, pédagogue et bienveillant.
+- Une seule question à la fois.
+- Suggestions toujours séparées du texte.
+- Pas de suggestions après un exercice."""
 
-- Après cette phrase, tu ne proposes PAS de suggestions.
-- Ne jamais écrire les suggestions DANS le texte principal : elles doivent être séparées et clairement identifiées après "Suggestions:".
-- Sois simple, clair, pédagogue et bienveillant dans ton ton.
-
-Respecte strictement cette structure.
-"""
-}
-
-@app.route("/chat", methods=["POST"])
+@app.route('/chat', methods=['POST'])
 def chat():
     try:
-        data = request.json
-        user_messages = data.get("messages", [])
-        
-        # Validation : filtrer les messages valides
+        data = request.get_json()
+        if not data or 'messages' not in data:
+            return jsonify({'error': 'No messages provided'}), 400
+
+        # Validate and format the conversation history
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
-            for msg in user_messages
+            for msg in data["messages"]
             if isinstance(msg, dict)
             and "role" in msg
             and "content" in msg
@@ -59,41 +54,60 @@ def chat():
             and msg["content"].strip() != ""
         ]
 
-        if not valid_messages:
-            return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
+        # Add system prompt at the beginning
+        conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + valid_messages
 
-        # Ajouter le système prompt au début
-        conversation = [SYSTEM_PROMPT] + valid_messages
+        # Log the conversation being sent to OpenAI
+        print("\n=== Sending to OpenAI ===")
+        for msg in conversation:
+            print(f"{msg['role'].upper()}: {msg['content'][:100]}...")
 
-        # Appel API OpenAI
+        # Get response from OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=conversation
         )
 
-        ai_full_message = response.choices[0].message.content.strip()
+        # Extract the response text
+        ai_message = response.choices[0].message.content.strip()
 
-        # Séparation message principal et suggestions
-        if "Suggestions:" in ai_full_message:
-            text_part, suggestions_part = ai_full_message.split("Suggestions:", 1)
-            text_part = text_part.strip()
+        # Log the response from OpenAI
+        print("\n=== Response from OpenAI ===")
+        print(ai_message)
+
+        # Initialize suggestions list
+        suggestions = []
+
+        # Check if the message contains suggestions
+        if "Suggestions:" in ai_message and "Est-ce que cet exercice t'a aidé ?" not in ai_message:
+            # Split the message and extract suggestions
+            parts = ai_message.split("Suggestions:")
+            ai_message = parts[0].strip()
+            
+            # Parse suggestions, removing empty lines and bullet points
+            suggestion_text = parts[1].strip()
             suggestions = [
-                line.lstrip("- ").strip()
-                for line in suggestions_part.strip().splitlines()
-                if line.strip()
+                line.strip().lstrip('- ').strip()
+                for line in suggestion_text.split('\n')
+                if line.strip() and line.strip() != '-'
             ]
-        else:
-            text_part = ai_full_message
-            suggestions = []
 
-        return jsonify({
-            "reply": text_part,
-            "suggestions": suggestions
-        })
+        # Format the response
+        response_data = {
+            'reply': ai_message,
+            'suggestions': suggestions
+        }
+
+        # Log the final formatted response
+        print("\n=== Final Response ===")
+        print(response_data)
+        print("==================\n")
+
+        return jsonify(response_data)
 
     except Exception as e:
-        print("Erreur serveur:", e)
-        return jsonify({"error": str(e)}), 500
+        print(f"\n=== Error ===\n{str(e)}\n============\n")
+        return jsonify({'error': str(e)}), 500
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=10000)
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)))
