@@ -10,31 +10,35 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
+# Créer un client OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# SYSTEM PROMPT
 SYSTEM_PROMPT = {
     "role": "system",
     "content": """
 Tu es un professeur de trompette expérimenté.
 
-Voici comment tu dois structurer toutes tes réponses :
+Voici comment tu dois structurer tes réponses :
 
-- Commence toujours par poser UNE question claire et simple si besoin.
-- Saute DEUX lignes (\n\n) après la question ou l'explication.
-- Puis écris :
+- Quand l'utilisateur exprime un problème, commence toujours par poser UNE question claire et simple pour mieux comprendre.
+- À chaque question, propose entre 2 et 4 suggestions pertinentes adaptées, sous la forme suivante, sans rien écrire autour :
 
 Suggestions:
 - Réponse 1
 - Réponse 2
 - Réponse 3
-- Réponse 4 (optionnel)
+- (Réponse 4, si utile)
 
-IMPORTANT :
-- Si tu proposes un exercice, tu termines avec la phrase exacte :
+- Quand le problème est suffisamment clair, propose UN exercice précis. Termine alors ton message par cette phrase exacte :
+
 "Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
-- Après cette phrase, **NE METS PAS** de suggestions.
-- Sois toujours clair, pédagogue, humain et précis.
-- Respecte absolument la structure sans rien inventer d'autre.
+
+- Après cette phrase, tu ne proposes PAS de suggestions.
+- Ne jamais écrire les suggestions DANS le texte principal : elles doivent être séparées et clairement identifiées après "Suggestions:".
+- Sois simple, clair, pédagogue et bienveillant dans ton ton.
+
+Respecte strictement cette structure.
 """
 }
 
@@ -43,7 +47,8 @@ def chat():
     try:
         data = request.json
         user_messages = data.get("messages", [])
-
+        
+        # Validation : filtrer les messages valides
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
@@ -57,34 +62,37 @@ def chat():
         if not valid_messages:
             return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
+        # Ajouter le système prompt au début
         conversation = [SYSTEM_PROMPT] + valid_messages
 
+        # Appel API OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=conversation
         )
 
-        ai_message = response.choices[0].message.content.strip()
+        ai_full_message = response.choices[0].message.content.strip()
 
-        # Parsing propre
-        suggestions = []
-        if "Suggestions:" in ai_message:
-            parts = ai_message.split("Suggestions:")
-            ai_message = parts[0].strip()
-            suggestion_lines = parts[1].strip().splitlines()
+        # Séparation message principal et suggestions
+        if "Suggestions:" in ai_full_message:
+            text_part, suggestions_part = ai_full_message.split("Suggestions:", 1)
+            text_part = text_part.strip()
             suggestions = [
                 line.lstrip("- ").strip()
-                for line in suggestion_lines
-                if line.strip() != ""
+                for line in suggestions_part.strip().splitlines()
+                if line.strip()
             ]
+        else:
+            text_part = ai_full_message
+            suggestions = []
 
         return jsonify({
-            "reply": ai_message,
+            "reply": text_part,
             "suggestions": suggestions
         })
 
     except Exception as e:
-        print("Erreur serveur:", str(e))
+        print("Erreur serveur:", e)
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
