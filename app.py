@@ -1,42 +1,45 @@
+from openai import OpenAI
+import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-from openai import OpenAI
-import os
 
-# Charger les variables d'environnement (dont OPENAI_API_KEY)
+# Charger les variables d'environnement
 load_dotenv()
 
 app = Flask(__name__)
 CORS(app)
 
-# Client OpenAI
+# Créer un client OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Prompt système
+# Prompt système structuré
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": """Tu es un professeur de trompette expérimenté. Voici les règles strictes à suivre pour répondre :
+    "content": """Tu es un professeur de trompette expérimenté.
 
-1. Si tu poses une question pour mieux comprendre, propose aussi entre 2 à 4 suggestions typiques dans un tableau JSON nommé 'suggestions'. Ne mets PAS ces suggestions dans ton texte principal.
-2. Si tu proposes un exercice, n'ajoute aucune suggestion (le tableau suggestions doit être vide).
-3. Ne donne JAMAIS une question et un exercice dans le même message.
-4. Sois toujours clair, pédagogue et bienveillant.
+Voici comment tu dois répondre :
 
-À CHAQUE réponse, respecte ce format exact :
+1. Quand l'utilisateur explique un problème, commence par poser UNE seule question courte et simple pour mieux comprendre.
 
-{
-  "reply": "Texte principal de la réponse (question ou exercice)",
-  "suggestions": ["Réponse 1", "Réponse 2", "Réponse 3"]
-}
+2. Quand tu poses une question, propose aussi 3 ou 4 suggestions de réponses adaptées que l'utilisateur pourra sélectionner.
 
-Si tu proposes un exercice, alors renvoie :
-{
-  "reply": "Texte principal de l'exercice",
-  "suggestions": []
-}
+Formate les suggestions ainsi dans ta réponse (sans écrire autre chose autour) :
 
-ATTENTION : Tu dois toujours répondre en JSON valide, sans jamais sortir de ce format."""
+Suggestions: 
+- Réponse 1
+- Réponse 2
+- Réponse 3
+
+3. Quand le problème est suffisamment clair, propose UN seul exercice ciblé (clair, précis et court). Termine alors ton message par cette phrase exacte :
+"Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+
+Important :
+- Ne propose jamais de suggestions après un exercice.
+- Si tu poses une question : propose 3-4 suggestions.
+- Si tu proposes un exercice : ne propose rien d'autre que l'exercice + la phrase de feedback.
+- Sois bienveillant, simple et pédagogue.
+"""
 }
 
 @app.route("/chat", methods=["POST"])
@@ -44,8 +47,7 @@ def chat():
     try:
         data = request.json
         user_messages = data.get("messages", [])
-
-        # Validation : filtrer les messages valides
+        
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
@@ -59,27 +61,26 @@ def chat():
         if not valid_messages:
             return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
-        # Ajouter le prompt système
         conversation = [SYSTEM_PROMPT] + valid_messages
 
-        # Appel OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
-            messages=conversation,
-            response_format="json"  # Demander explicitement du JSON
+            messages=conversation
         )
 
-        # Récupérer directement le JSON retourné
-        raw_reply = response.choices[0].message.content
+        full_reply = response.choices[0].message.content.strip()
 
-        # Convertir en dict
-        import json
-        parsed_reply = json.loads(raw_reply)
+        # Chercher s'il y a des suggestions dans la réponse
+        if "Suggestions:" in full_reply:
+            reply_text, suggestions_block = full_reply.split("Suggestions:", 1)
+            suggestions = [line.strip("- ").strip() for line in suggestions_block.strip().split("\n") if line.strip()]
+        else:
+            reply_text = full_reply
+            suggestions = []
 
-        # Sécuriser la réponse retournée au front
         return jsonify({
-            "reply": parsed_reply.get("reply", "Réponse vide."),
-            "suggestions": parsed_reply.get("suggestions", [])
+            "reply": reply_text.strip(),
+            "suggestions": suggestions
         })
 
     except Exception as e:
