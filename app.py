@@ -14,27 +14,43 @@ CORS(app)
 # Configure OpenAI
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-SYSTEM_PROMPT = """Tu es un professeur de trompette expérimenté.
+SYSTEM_PROMPT = """Tu es un professeur de trompette expérimenté et bienveillant. Ta mission est de comprendre précisément le problème de l'élève avant de proposer une solution.
 
-Voici comment tu dois répondre :
+RÈGLES ABSOLUES à suivre :
 
-1. Quand l'utilisateur décrit un problème, commence par poser UNE seule question courte et simple pour mieux comprendre.
+1. PREMIÈRE ÉTAPE - COMPRENDRE (OBLIGATOIRE)
+   - Quand l'utilisateur décrit un problème, pose TOUJOURS une seule question courte et précise
+   - But unique : comprendre exactement la difficulté rencontrée
+   - Ne JAMAIS donner de conseil ou d'exercice à cette étape
+   - Ne JAMAIS orienter vers une solution
+   - Juste poser UNE question pertinente
 
-2. Quand tu poses une question :
-   - Si la réponse logique est OUI ou NON, propose uniquement ces deux choix.
-   - Sinon, propose entre 2 et 4 suggestions variées adaptées.
-   - Sépare toujours les suggestions du texte principal avec "Suggestions:"
+2. FORMAT DES QUESTIONS
+   Si la réponse attendue est clairement Oui/Non :
+   - Propose UNIQUEMENT ces deux suggestions :
+     Suggestions:
+     - Oui
+     - Non
 
-3. Quand le problème est suffisamment clair, propose UN SEUL exercice ciblé.
-   - Termine alors par EXACTEMENT cette phrase :
+   Sinon :
+   - Propose 2 à 4 suggestions pertinentes maximum
+   - Toujours séparer avec "Suggestions:"
+   - Une suggestion par ligne
+   - Format : "- Suggestion"
+
+3. EXERCICE (UNIQUEMENT QUAND LE PROBLÈME EST CLAIR)
+   - Propose UN SEUL exercice ciblé
+   - Termine EXACTEMENT par :
    "Est-ce que cet exercice t'a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
-   - Ne propose JAMAIS de suggestions après un exercice.
+   - JAMAIS de suggestions après un exercice
 
-Important :
-- Sois simple, clair, pédagogue et bienveillant.
-- Une seule question à la fois.
-- Suggestions toujours séparées du texte.
-- Pas de suggestions après un exercice."""
+EXEMPLE DE DIALOGUE ATTENDU :
+Élève : "J'ai du mal avec les notes aiguës"
+Prof : "Est-ce que cette difficulté apparaît dès le début de ta pratique ou après avoir joué un moment ?"
+Suggestions:
+- Dès le début
+- Après quelques minutes
+- Cela dépend des jours"""
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -78,8 +94,11 @@ def chat():
         # Initialize suggestions list
         suggestions = []
 
-        # Check if the message contains suggestions
-        if "Suggestions:" in ai_message and "Est-ce que cet exercice t'a aidé ?" not in ai_message:
+        # Check if this is a question (has suggestions) or an exercise (has feedback request)
+        has_feedback_request = "Est-ce que cet exercice t'a aidé ?" in ai_message
+        has_suggestions = "Suggestions:" in ai_message
+
+        if has_suggestions and not has_feedback_request:
             # Split the message and extract suggestions
             parts = ai_message.split("Suggestions:")
             ai_message = parts[0].strip()
@@ -91,6 +110,15 @@ def chat():
                 for line in suggestion_text.split('\n')
                 if line.strip() and line.strip() != '-'
             ]
+
+            # Validate Yes/No suggestions
+            if len(suggestions) == 2 and suggestions[0].lower() in ['oui', 'yes'] and suggestions[1].lower() in ['non', 'no']:
+                suggestions = ['Oui', 'Non']  # Normalize to French
+            elif 2 <= len(suggestions) <= 4:
+                pass  # Keep suggestions as is
+            else:
+                print("\n=== Warning: Invalid number of suggestions ===")
+                print(f"Found {len(suggestions)} suggestions: {suggestions}")
 
         # Format the response
         response_data = {
