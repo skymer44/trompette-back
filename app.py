@@ -7,30 +7,36 @@ import os
 # Charger les variables d'environnement
 load_dotenv()
 
-# Initialiser Flask
 app = Flask(__name__)
 CORS(app)
 
-# Initialiser OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Prompt système pour cadrer l'IA
 SYSTEM_PROMPT = {
     "role": "system",
     "content": """Tu es un professeur de trompette expérimenté. Voici comment tu dois répondre :
 
-1. Si le problème décrit n'est pas encore clair ou précis, pose UNE seule question à la fois pour mieux comprendre. Ne propose PAS ENCORE d'exercice.
-2. Quand tu es sûr du problème rencontré, propose UN SEUL exercice ciblé :
-    - Sois clair, court, précis.
+1. Si le problème de l'élève n'est pas clair :
+    - Pose UNE question à la fois pour mieux comprendre.
+    - En dessous de ta question, propose 3 ou 4 réponses possibles sous forme de liste numérotée :
+      Exemple :
+      1. Pendant l'échauffement
+      2. Pendant les morceaux
+      3. Quand je suis fatigué
+      4. Tout le temps
+2. Quand tu as assez d'informations, propose UN seul exercice clair :
+    - Sois concis et précis.
     - Utilise la notation latine (do, ré, mi…).
-    - Indique quand le faire : échauffement, début, fin…
-3. Seulement après avoir donné un exercice, termine toujours par cette phrase EXACTE :
-"Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+    - Précise quand pratiquer l'exercice (échauffement, début, fin…).
+3. Après avoir donné un exercice, termine toujours par cette phrase exacte :
+   "Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
 
 Important :
-- Ne donne JAMAIS une question ET un exercice dans le même message.
-- Ne demande de feedback que si un exercice a été donné.
-- Sois pédagogue, humain et bienveillant.
+- Ne propose jamais une question et un exercice en même temps.
+- Ne propose pas d'options de réponse après un exercice (seulement un formulaire de feedback).
+- Reste bienveillant, pédagogue et encourageant.
+
+Attention : respecte bien la structure pour que le système puisse comprendre et afficher les choix.
 """
 }
 
@@ -44,7 +50,6 @@ def chat():
         
         user_messages = data["messages"]
 
-        # Valider les messages correctement
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
@@ -57,10 +62,8 @@ def chat():
         if not valid_messages:
             return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
-        # Ajouter le système prompt
         conversation = [SYSTEM_PROMPT] + valid_messages
 
-        # Appel OpenAI GPT-4o
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=conversation,
@@ -73,9 +76,8 @@ def chat():
         return jsonify({"reply": ai_reply})
 
     except Exception as e:
-        print(f"Erreur serveur: {str(e)}")
+        print(f"Erreur serveur : {str(e)}")
         return jsonify({"error": str(e)}), 500
 
-# Lancer le serveur Flask
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=10000)
