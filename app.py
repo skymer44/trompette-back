@@ -66,37 +66,23 @@ RÈGLES ABSOLUES à suivre pour CHAQUE réponse :
    - Suggestions toujours cohérentes avec la question"""
 
 def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
-    """
-    Validate the OpenAI response format and content.
-    Returns the parsed JSON if valid, None otherwise.
-    """
     try:
-        # Parse JSON
         parsed = json.loads(response)
-        
-        # Validate required fields
         if not all(key in parsed for key in ["reply", "suggestions", "is_exercise"]):
             logger.error(f"Missing required fields in response: {parsed}")
             return None
-            
-        # Validate types
         if not isinstance(parsed["reply"], str) or \
            not isinstance(parsed["suggestions"], list) or \
            not isinstance(parsed["is_exercise"], bool):
             logger.error(f"Invalid field types in response: {parsed}")
             return None
-            
-        # Validate suggestions
         if parsed["is_exercise"] and len(parsed["suggestions"]) != 0:
             logger.error(f"Exercise response contains suggestions: {parsed}")
             return None
-            
         if not parsed["is_exercise"] and not (2 <= len(parsed["suggestions"]) <= 4):
             logger.error(f"Invalid number of suggestions for question: {parsed}")
             return None
-            
         return parsed
-        
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse JSON response: {e}")
         return None
@@ -105,37 +91,25 @@ def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
         return None
 
 def get_openai_response(messages: list, max_retries: int = 3) -> Optional[Dict[str, Any]]:
-    """
-    Get and validate response from OpenAI with retry mechanism.
-    """
     for attempt in range(max_retries):
         try:
             logger.info(f"Attempting OpenAI request (attempt {attempt + 1}/{max_retries})")
-            
             response = client.chat.completions.create(
-    model="gpt-4",
-    messages=messages,
-    response_format="json_object"
-)
-            
+                model="gpt-4",
+                messages=messages,
+                response_format="json_object"
+            )
             content = response.choices[0].message.content.strip()
             logger.info(f"OpenAI raw response: {content}")
-            
             validated_response = validate_openai_response(content)
             if validated_response:
                 return validated_response
-                
             logger.warning(f"Invalid response format (attempt {attempt + 1})")
-            
         except Exception as e:
             logger.error(f"OpenAI API error (attempt {attempt + 1}): {str(e)}")
-            
     return None
 
 def create_error_response(message: str = "Une erreur est survenue. Veuillez réessayer.") -> Dict[str, Any]:
-    """
-    Create a standardized error response.
-    """
     return {
         "reply": message,
         "suggestions": [],
@@ -145,16 +119,12 @@ def create_error_response(message: str = "Une erreur est survenue. Veuillez rée
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
-        # Validate request
         data = request.get_json()
         if not data or 'messages' not in data:
             logger.warning("Invalid request: missing messages")
             return jsonify(create_error_response("Format de requête invalide")), 400
 
-        # Log incoming request
         logger.info(f"Received chat request with {len(data['messages'])} messages")
-        
-        # Validate and format messages
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in data["messages"]
@@ -164,20 +134,15 @@ def chat():
             and isinstance(msg["content"], str)
             and msg["content"].strip()
         ]
-        
-        # Prepare conversation with system prompt
         conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + valid_messages
-        
-        # Get OpenAI response
         response = get_openai_response(conversation)
         if not response:
             logger.error("Failed to get valid response from OpenAI")
             return jsonify(create_error_response()), 500
-            
-        # Return successful response
+
         logger.info("Sending successful response to client")
         return jsonify(response), 200
-        
+
     except Exception as e:
         logger.error(f"Unexpected error in chat endpoint: {str(e)}")
         return jsonify(create_error_response()), 500
