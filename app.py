@@ -1,5 +1,6 @@
 from openai import OpenAI
 import os
+import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
@@ -10,32 +11,35 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Initialiser OpenAI
+# Créer un client OpenAI avec la clé API
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Prompt système corrigé
+# Prompt système structuré
 SYSTEM_PROMPT = {
     "role": "system",
     "content": """
-Tu es un professeur de trompette expérimenté. Voici exactement comment tu dois te comporter :
+Tu es un professeur de trompette expérimenté et bienveillant.
 
-1. Si le problème n'est pas encore clair ou précis, POSE UNE SEULE QUESTION.
-    ➔ Après ta question, propose TOUJOURS entre 2 et 4 réponses possibles sous forme de texte court, en français, adaptées au contexte.
-    ➔ Même si ce n'est pas évident, invente les réponses les plus logiques et naturelles possibles, mais sans jamais inventer du faux.
+Important :
+- Tu dois TOUJOURS répondre strictement en JSON.
+- Le JSON doit contenir deux clés : 
+  - "reply" : la phrase principale que tu veux afficher à l'utilisateur (sans liste, sans numérotation)
+  - "suggestions" : un tableau (array) de 2 à 4 suggestions possibles à cliquer.
 
-2. Si tu as compris clairement le problème, PROPOSE UN EXERCICE.
-    ➔ Donne un seul exercice clair, concis et ciblé.
-    ➔ Utilise la notation latine pour les notes de musique (do, ré, mi…).
-    ➔ Indique dans quel moment le pratiquer (échauffement, début, fin...).
+Règles :
+- Si tu poses une question (par exemple pour clarifier un problème), génère entre 2 et 4 suggestions courtes et naturelles.
+- Si tu proposes un exercice, alors :
+  - Le "reply" contient l'explication de l'exercice.
+  - Le "suggestions" doit être vide [].
 
-3. Après avoir donné un exercice, termine TOUJOURS ton message par cette phrase EXACTE :
-"Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+Attention :
+- Tu ne dois jamais écrire les suggestions dans le texte principal ("reply").
+- Le "reply" doit être naturel et sans numérotation.
+- Le JSON doit être valide.
 
-Rappels importants :
-- Ne pose jamais une question ET un exercice dans le même message.
-- Ne propose jamais zéro ni plus de 4 suggestions après une question.
-- Si la réponse libre est meilleure pour l'utilisateur, il pourra toujours écrire sa réponse manuellement.
-- Sois toujours bienveillant, encourageant et professionnel.
+Exemples corrects :
+{"reply": "Est-ce que tu ressens une tension dans l'embouchure ?", "suggestions": ["Oui", "Non", "Parfois"]}
+{"reply": "Voici un exercice pour améliorer ton souffle...", "suggestions": []}
 """
 }
 
@@ -44,46 +48,49 @@ def chat():
     try:
         data = request.json
         user_messages = data.get("messages", [])
-        
-        # Validation des messages
+
+        # Validation basique
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
-            if isinstance(msg, dict) and "role" in msg and "content" in msg and isinstance(msg["content"], str) and msg["content"].strip() != ""
+            if isinstance(msg, dict)
+            and "role" in msg
+            and "content" in msg
+            and isinstance(msg["content"], str)
+            and msg["content"].strip() != ""
         ]
 
         if not valid_messages:
             return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
-        # Construire la conversation avec le system prompt
+        # Conversation complète
         conversation = [SYSTEM_PROMPT] + valid_messages
 
-        # Appeler OpenAI
+        # Appel à OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=conversation,
-            temperature=0.5  # Optionnel : pour des réponses plus naturelles
+            temperature=0.7
         )
 
-        reply_content = response.choices[0].message.content.strip()
+        raw_content = response.choices[0].message.content.strip()
 
-        # Détecter s'il y a des suggestions encadrées (markdown liste ou numérotation simple)
-        suggestions = []
-        lines = reply_content.split('\n')
-        for line in lines:
-            line = line.strip()
-            if line.startswith("1.") or line.startswith("2.") or line.startswith("3.") or line.startswith("4.") or line.startswith("- "):
-                suggestion = line[line.find(' ')+1:].strip()
-                suggestions.append(suggestion)
+        # Essayer de parser proprement le JSON
+        try:
+            parsed_response = json.loads(raw_content)
 
-        # Limiter à 2-4 suggestions seulement
-        if len(suggestions) < 2 or len(suggestions) > 4:
-            suggestions = []
+            # Vérifier que les bonnes clés existent
+            if "reply" in parsed_response and "suggestions" in parsed_response:
+                return jsonify({
+                    "reply": parsed_response["reply"],
+                    "suggestions": parsed_response["suggestions"]
+                })
+            else:
+                return jsonify({"error": "Réponse JSON invalide (clés manquantes)."}), 500
 
-        return jsonify({
-            "reply": reply_content,
-            "suggestions": suggestions
-        })
+        except json.JSONDecodeError:
+            print("Erreur de parsing JSON sur le contenu:", raw_content)
+            return jsonify({"error": "Erreur de parsing JSON."}), 500
 
     except Exception as e:
         print("Erreur serveur:", e)
