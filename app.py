@@ -1,48 +1,42 @@
-from openai import OpenAI
-import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
+from openai import OpenAI
+import os
 
-# Charger les variables d'environnement
+# Charger les variables d'environnement (dont OPENAI_API_KEY)
 load_dotenv()
 
-# Initialisation Flask
 app = Flask(__name__)
 CORS(app)
 
-# Initialisation OpenAI
+# Client OpenAI
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# Prompt système pour cadrer l'IA
+# Prompt système
 SYSTEM_PROMPT = {
     "role": "system",
-    "content": """Tu es un professeur de trompette expérimenté. Voici comment tu dois fonctionner :
-    
-1. Si l'utilisateur expose un problème, commence par lui poser UNE seule question à la fois pour mieux comprendre. Ne propose pas d'exercice tout de suite.
-2. Quand tu as assez d'informations pour comprendre le problème, propose UN seul exercice clair et court.
-3. Lorsque tu proposes un exercice, termine toujours par la phrase EXACTE :
-"Est-ce que cet exercice t’a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?"
+    "content": """Tu es un professeur de trompette expérimenté. Voici les règles strictes à suivre pour répondre :
 
-Important :
-- Quand tu poses une question, fournis en plus une liste de 2 à 4 suggestions d'exemples de réponses typiques sous forme de tableau JSON.
-- Quand tu proposes un exercice, NE DONNE AUCUNE suggestion supplémentaire. Juste l'exercice + la phrase de feedback.
-- Utilise un ton pédagogue, encourageant et humain.
-- Utilise la notation latine (do, ré, mi...) pour les notes de musique.
-- Ne donne jamais d'exercice dans la même réponse qu'une question.
+1. Si tu poses une question pour mieux comprendre, propose aussi entre 2 à 4 suggestions typiques dans un tableau JSON nommé 'suggestions'. Ne mets PAS ces suggestions dans ton texte principal.
+2. Si tu proposes un exercice, n'ajoute aucune suggestion (le tableau suggestions doit être vide).
+3. Ne donne JAMAIS une question et un exercice dans le même message.
+4. Sois toujours clair, pédagogue et bienveillant.
 
-Format de réponse obligatoire :
+À CHAQUE réponse, respecte ce format exact :
+
 {
-  "reply": "ta réponse textuelle complète ici",
-  "suggestions": ["réponse possible 1", "réponse possible 2", "réponse possible 3"]
+  "reply": "Texte principal de la réponse (question ou exercice)",
+  "suggestions": ["Réponse 1", "Réponse 2", "Réponse 3"]
 }
-OU
+
+Si tu proposes un exercice, alors renvoie :
 {
-  "reply": "ta réponse textuelle complète ici",
+  "reply": "Texte principal de l'exercice",
   "suggestions": []
 }
-Ne JAMAIS oublier ce format JSON propre, même si tu n'as pas de suggestions.
-"""
+
+ATTENTION : Tu dois toujours répondre en JSON valide, sans jamais sortir de ce format."""
 }
 
 @app.route("/chat", methods=["POST"])
@@ -51,6 +45,7 @@ def chat():
         data = request.json
         user_messages = data.get("messages", [])
 
+        # Validation : filtrer les messages valides
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
             for msg in user_messages
@@ -64,17 +59,28 @@ def chat():
         if not valid_messages:
             return jsonify({"error": "Aucun message utilisateur valide reçu."}), 400
 
+        # Ajouter le prompt système
         conversation = [SYSTEM_PROMPT] + valid_messages
 
+        # Appel OpenAI
         response = client.chat.completions.create(
             model="gpt-4o",
             messages=conversation,
-            response_format="json"
+            response_format="json"  # Demander explicitement du JSON
         )
 
-        ai_message = response.choices[0].message.content
+        # Récupérer directement le JSON retourné
+        raw_reply = response.choices[0].message.content
 
-        return jsonify({"reply": ai_message})
+        # Convertir en dict
+        import json
+        parsed_reply = json.loads(raw_reply)
+
+        # Sécuriser la réponse retournée au front
+        return jsonify({
+            "reply": parsed_reply.get("reply", "Réponse vide."),
+            "suggestions": parsed_reply.get("suggestions", [])
+        })
 
     except Exception as e:
         print("Erreur serveur:", e)
