@@ -1,190 +1,40 @@
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-from dotenv import load_dotenv
-import os
-import json
-import logging
+Mon application utilise la bibliothèque openai pour interagir avec l’API d’OpenAI. Je souhaite que le projet utilise **exactement la version 1.75.0** de cette bibliothèque, qui est la dernière version stable publiée.
+
+**Objectifs** :
+
+1. **Mettre à jour les dépendances** :
+    - Dans le fichier requirements.txt, spécifier :
+
+openai==1.75.0
+
+1. **Adapter le code pour utiliser correctement la dernière version de OpenAI** :
+    - Importer et initialiser le client OpenAI comme suit :
+
 from openai import OpenAI
-from typing import Dict, Any, Optional
+import os
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+1. **Utiliser obligatoirement le modèle GPT-4o** :
+    - Quand tu écris un appel à l’API dans le backend, la valeur du modèle doit être "gpt-4o", comme ceci :
+
+response = client.chat.completions.create(
+model="gpt-4o",
+messages=[
+{"role": "system", "content": "You are a helpful assistant."},
+{"role": "user", "content": "Bonjour, j'ai une question sur la trompette..."},
+]
 )
-logger = logging.getLogger(__name__)
 
-# Load environment variables
-load_dotenv()
-
-# Initialize Flask app
-app = Flask(__name__)
-CORS(app)
-
-# Configure OpenAI
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
-
-SYSTEM_PROMPT = """Tu es un professeur de trompette expérimenté et bienveillant. Ta mission est d'aider les élèves à progresser en comprenant précisément leurs difficultés avant de proposer des solutions.
-
-RÈGLES ABSOLUES À RESPECTER POUR CHAQUE RÉPONSE :
-
-1. FORMAT DE RÉPONSE (TOUJOURS LE MÊME) :
-Réponds uniquement en JSON avec cette structure exacte :
-{
-  "reply": "ton message",
-  "suggestions": ["suggestion 1", "suggestion 2", ...],
-  "is_exercise": false/true
-}
-
-2. DEUX TYPES DE RÉPONSES POSSIBLES :
-
-   A) QUESTION À L'ÉLÈVE (is_exercise: false)
-      - Objectif : Comprendre la difficulté précise de l'élève.
-      - "reply" doit contenir UNE question courte et claire.
-      - "suggestions" doit proposer entre 2 et 4 choix courts maximum.
-      - Ne JAMAIS donner de conseil ou d'exercice à cette étape.
-
-   B) PROPOSITION D'UN EXERCICE (is_exercise: true)
-      - Objectif : Aider l'élève à résoudre son problème.
-      - "suggestions" DOIT ÊTRE une liste vide [].
-      - "reply" DOIT être structuré en DEUX PARTIES OBLIGATOIRES :
-        1) Une description claire de l'exercice.
-        2) Puis TERMINER EXCLUSIVEMENT par cette phrase, mot pour mot :
-           Est-ce que cet exercice t'a aidé ? Peux-tu me dire si ça fonctionne pour toi ou si tu ressens encore une difficulté ?
-
-   IMPORTANT : 
-   - Cette phrase finale est OBLIGATOIRE pour TOUT exercice.
-   - NE PAS ajouter d'autres phrases après cette question.
-
-3. RÈGLES DE FORMATTING STRICTES :
-   - Aucun texte hors du JSON.
-   - Jamais de formatage Markdown dans "reply".
-   - Pas d'introduction, pas d'excuse, pas de message de conclusion.
-   - Les suggestions doivent être adaptées à la question posée.
-
-4. MODE LIBRE (free_mode: true) :
-   - Continuer la conversation normalement sans forcer un exercice.
-   - Répondre aux questions de l'élève de manière naturelle.
-   - Proposer un exercice UNIQUEMENT si l'élève le demande explicitement.
-   - Garder le format JSON mais adapter le contenu selon le contexte.
-
-Ton objectif est de rester simple, bienveillant et rigoureux.
-Respecte TOUTES ces règles sans exception.
-"""
-
-def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
-    """
-    Validate the OpenAI response format and content.
-    Returns the parsed JSON if valid, None otherwise.
-    """
-    try:
-        parsed = json.loads(response)
-        if not all(key in parsed for key in ["reply", "suggestions", "is_exercise"]):
-            logger.error(f"Missing required fields in response: {parsed}")
-            return None
-        if not isinstance(parsed["reply"], str) or \
-           not isinstance(parsed["suggestions"], list) or \
-           not isinstance(parsed["is_exercise"], bool):
-            logger.error(f"Invalid field types in response: {parsed}")
-            return None
-        if parsed["is_exercise"] and len(parsed["suggestions"]) != 0:
-            logger.error(f"Exercise response contains suggestions: {parsed}")
-            return None
-        if not parsed["is_exercise"] and not (2 <= len(parsed["suggestions"]) <= 4):
-            logger.error(f"Invalid number of suggestions for question: {parsed}")
-            return None
-        return parsed
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse JSON response: {e}")
-        return None
-    except Exception as e:
-        logger.error(f"Unexpected error validating response: {e}")
-        return None
-
-def get_openai_response(messages: list, free_mode: bool = False, max_retries: int = 3) -> Optional[Dict[str, Any]]:
-    """
-    Get and validate response from OpenAI with retry mechanism.
-    """
-    for attempt in range(max_retries):
-        try:
-            logger.info(f"Attempting OpenAI request (attempt {attempt + 1}/{max_retries})")
-            
-            # Add free_mode context to the system message
-            system_message = messages[0]["content"]
-            if free_mode:
-                system_message = system_message.replace(
-                    "4. MODE LIBRE (free_mode: true) :",
-                    "4. MODE LIBRE (free_mode: true) : [ACTIF]\n"
-                )
-            messages[0]["content"] = system_message
-
-            response = client.chat.completions.create(
-                model="gpt-4",
-                messages=messages,
-                response_format={"type": "json_object"}
-            )
-
-            content = response.choices[0].message.content.strip()
-            logger.info(f"OpenAI raw response: {content}")
-
-            validated_response = validate_openai_response(content)
-            if validated_response:
-                return validated_response
-
-            logger.warning(f"Invalid response format (attempt {attempt + 1})")
-
-        except Exception as e:
-            logger.error(f"OpenAI API error (attempt {attempt + 1}): {str(e)}")
-
-    return None
-
-def create_error_response(message: str = "Une erreur est survenue. Veuillez réessayer.") -> Dict[str, Any]:
-    """
-    Create a standardized error response.
-    """
-    return {
-        "reply": message,
-        "suggestions": [],
-        "is_exercise": False
-    }
-
-@app.route('/chat', methods=['POST'])
-def chat():
-    try:
-        data = request.get_json()
-        if not data or 'messages' not in data:
-            logger.warning("Invalid request: missing messages")
-            return jsonify(create_error_response("Format de requête invalide")), 400
-
-        logger.info(f"Received chat request with {len(data['messages'])} messages")
-        free_mode = data.get('free_mode', False)
-        logger.info(f"Free mode: {free_mode}")
-
-        valid_messages = [
-            {"role": msg["role"], "content": msg["content"]}
-            for msg in data["messages"]
-            if isinstance(msg, dict)
-            and "role" in msg
-            and "content" in msg
-            and isinstance(msg["content"], str)
-            and msg["content"].strip()
-        ]
-
-        conversation = [{"role": "system", "content": SYSTEM_PROMPT}] + valid_messages
-
-        response = get_openai_response(conversation, free_mode)
-        if not response:
-            logger.error("Failed to get valid response from OpenAI")
-            return jsonify(create_error_response()), 500
-
-        logger.info("Sending successful response to client")
-        return jsonify(response), 200
-
-    except Exception as e:
-        logger.error(f"Unexpected error in chat endpoint: {str(e)}")
-        return jsonify(create_error_response()), 500
-
-if __name__ == '__main__':
-    port = int(os.getenv('PORT', 5000))
-    logger.info(f"Starting Flask server on port {port}")
-    app.run(host='0.0.0.0', port=port)
+1. **Respecter la structure de communication** :
+    - Vérifie que le front-end envoie bien à chaque appel les deux informations nécessaires :
+        - messages (tableau d’objets { role: “user” / “assistant”, content: “…” })
+        - user_id (identifiant utilisateur unique pour associer les conversations)
+    - Si jamais l’utilisateur n’est pas connecté, un user_id temporaire doit être généré côté front-end pour pouvoir quand même discuter.
+2. **Supprimer tout paramètre obsolète** :
+    - Ne pas utiliser de paramètre proxies ou d’autres paramètres non pris en charge dans la version 1.75.0.
+    - Corriger si besoin les autres appels pour qu’ils soient compatibles avec la documentation officielle OpenAI v1.75.0.
+3. **Autres contraintes** :
+    - Assure-toi que le code est totalement fonctionnel pour Python 3.11.
+    - L’application doit continuer à fonctionner normalement après migration.
+    - Aucun avertissement de dépréciation ne doit apparaître dans les logs.
