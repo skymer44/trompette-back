@@ -71,6 +71,10 @@ Respecte TOUTES ces règles sans exception.
 """
 
 def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
+    """
+    Validate the OpenAI response format and content.
+    Returns the parsed JSON if valid, None otherwise.
+    """
     try:
         parsed = json.loads(response)
         if not all(key in parsed for key in ["reply", "suggestions", "is_exercise"]):
@@ -96,6 +100,9 @@ def validate_openai_response(response: str) -> Optional[Dict[str, Any]]:
         return None
 
 def get_openai_response(messages: list, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+    """
+    Get and validate response from OpenAI with retry mechanism.
+    """
     for attempt in range(max_retries):
         try:
             logger.info(f"Attempting OpenAI request (attempt {attempt + 1}/{max_retries})")
@@ -121,6 +128,9 @@ def get_openai_response(messages: list, max_retries: int = 3) -> Optional[Dict[s
     return None
 
 def create_error_response(message: str = "Une erreur est survenue. Veuillez réessayer.") -> Dict[str, Any]:
+    """
+    Create a standardized error response.
+    """
     return {
         "reply": message,
         "suggestions": [],
@@ -131,18 +141,15 @@ def create_error_response(message: str = "Une erreur est survenue. Veuillez rée
 def chat():
     try:
         data = request.get_json()
-        if not data or not isinstance(data.get('messages'), list):
-            logger.warning("Invalid request: missing messages list")
+        if not data or 'messages' not in data:
+            logger.warning("Invalid request: missing messages")
             return jsonify(create_error_response("Format de requête invalide")), 400
 
-        user_id = data.get('user_id')
-        messages = data['messages']
-
-        logger.info(f"Received chat request with {len(messages)} messages")
+        logger.info(f"Received chat request with {len(data['messages'])} messages")
 
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
-            for msg in messages
+            for msg in data["messages"]
             if isinstance(msg, dict)
             and "role" in msg
             and "content" in msg
