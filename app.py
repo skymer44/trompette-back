@@ -1,7 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv
-from supabase import create_client, Client
 import os
 import json
 import logging
@@ -25,12 +24,6 @@ CORS(app)
 # Configure OpenAI
 client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
-# Configure Supabase
-supabase_url = os.getenv("SUPABASE_URL")
-supabase_key = os.getenv("SUPABASE_KEY")
-supabase: Client = create_client(supabase_url, supabase_key)
-
-# System prompt for OpenAI
 SYSTEM_PROMPT = """Tu es un professeur de trompette expérimenté et bienveillant. Ta mission est d'aider les élèves à progresser en comprenant précisément leurs difficultés avant de proposer des solutions.
 
 RÈGLES ABSOLUES À RESPECTER POUR CHAQUE RÉPONSE :
@@ -134,38 +127,22 @@ def create_error_response(message: str = "Une erreur est survenue. Veuillez rée
         "is_exercise": False
     }
 
-def get_user_preferences(user_id: str) -> Optional[Dict[str, Any]]:
-    try:
-        response = supabase.table('user_preferences').select('*').eq('user_id', user_id).single().execute()
-        if response.data:
-            return response.data
-        else:
-            logger.warning(f"User preferences not found for user_id: {user_id}")
-            return None
-    except Exception as e:
-        logger.error(f"Error fetching user preferences: {str(e)}")
-        return None
-
 @app.route('/chat', methods=['POST'])
 def chat():
     try:
         data = request.get_json()
-        if not data or 'messages' not in data or 'user_id' not in data:
-            logger.warning("Invalid request: missing messages or user_id")
+        if not data or not isinstance(data.get('messages'), list):
+            logger.warning("Invalid request: missing messages list")
             return jsonify(create_error_response("Format de requête invalide")), 400
 
-        user_id = data['user_id']
+        user_id = data.get('user_id')
+        messages = data['messages']
 
-        user_preferences = get_user_preferences(user_id)
-        if user_preferences and user_preferences.get('awaiting_feedback', False):
-            logger.info(f"Blocking chat for user_id: {user_id} awaiting feedback")
-            return jsonify(create_error_response("Merci de donner d'abord votre avis sur l'exercice avant de continuer.")), 403
-
-        logger.info(f"Received chat request with {len(data['messages'])} messages")
+        logger.info(f"Received chat request with {len(messages)} messages")
 
         valid_messages = [
             {"role": msg["role"], "content": msg["content"]}
-            for msg in data["messages"]
+            for msg in messages
             if isinstance(msg, dict)
             and "role" in msg
             and "content" in msg
